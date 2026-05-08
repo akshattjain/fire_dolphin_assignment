@@ -39,33 +39,33 @@ I chose Option C because it directly satisfies the precision requirement: every 
 
 ### Key Design Decisions
 
-**Chunking strategy — sliding window, not AST-first**
+Chunking strategy — sliding window, not AST-first
 
-My first instinct was to use `tree-sitter` to parse Abstract Syntax Trees and extract named functions and classes as semantic chunks. This is theoretically superior because each chunk is a complete, meaningful unit. In practice it introduced three problems: (1) grammar packages are not uniformly available for all languages, (2) very large functions produce oversized chunks that do not embed well, and (3) configuration and edge-case handling adds complexity that can break silently. I pivoted to a sliding-window chunker with 50-line windows and 10-line overlap. This is language-agnostic, robust, predictable, and still captures local structure because adjacent context is preserved by the overlap. The overlap ensures that a code pattern spanning a chunk boundary still appears in at least one chunk.
+I initially considered AST-based chunking using tree-sitter, but it introduced language support issues, oversized chunks, and added complexity. I switched to a simpler sliding-window approach with 50-line chunks and 10-line overlap, which is language-agnostic, reliable, and preserves nearby context across chunk boundaries.
 
-**Single Qdrant collection, `repo_id` as namespace**
+Single Qdrant collection, repo_id as namespace
 
-Rather than creating one Qdrant collection per repository (which would require dynamic collection management and explode under many repos), I use a single collection `code_chunks` and tag every point with a `repo_id` payload field. All searches include a `must` filter on `repo_id`. This is standard in production vector databases — the namespace is a metadata filter, not a structural boundary. It scales horizontally without schema changes.
+Instead of creating separate collections per repository, I use a single code_chunks collection and isolate repositories using a repo_id metadata filter. This avoids collection management overhead and scales more efficiently.
 
-**Asynchronous ingestion via RabbitMQ + Celery**
+Asynchronous ingestion via RabbitMQ + Celery
 
-Cloning a repository and processing hundreds of files takes seconds to minutes. Blocking an HTTP request for that duration is unacceptable. The API immediately creates a database record, dispatches a Celery task to RabbitMQ, and returns the `repo_id`. The client polls `/status` until the status transitions to `COMPLETED`. This pattern (fire-and-forget + polling) is simple, observable, and resilient — the task can be retried automatically on failure.
+Repository ingestion can take significant time, so the API immediately returns a repo_id after dispatching a Celery task through RabbitMQ. The client then polls a /status endpoint until processing completes, enabling a responsive and fault-tolerant workflow.
 
-**Dual SQLAlchemy engines**
+Dual SQLAlchemy engines
 
-FastAPI uses `asyncpg` (async) for non-blocking request handling. Celery workers are synchronous; running `asyncio.run()` inside a Celery task creates a fresh event loop per call, which fights with connection pooling. The cleaner solution is a dedicated `psycopg2`-backed synchronous session factory used only by worker code. The API and the worker never share sessions; they share only the database.
+FastAPI uses async PostgreSQL sessions for non-blocking requests, while Celery workers use synchronous sessions with psycopg2. Separating them avoids event loop conflicts and keeps database interactions stable.
 
-**Raw files in S3, chunks in Qdrant, metadata in Postgres**
+Raw files in S3, chunks in Qdrant, metadata in Postgres
 
-Each storage layer holds exactly what it is good at: S3 stores arbitrary binary/text at low cost; Qdrant stores and searches dense vectors efficiently; Postgres stores structured metadata (file paths, line numbers, statuses, chat history) that needs relational queries and foreign-key integrity. This separation makes each layer independently replaceable.
+Each storage layer serves a dedicated purpose: S3 stores raw repository files, Qdrant handles vector search, and Postgres manages structured metadata like file paths, statuses, and chat history.
 
-**Chat history in Postgres, not in memory**
+Chat history in Postgres, not in memory
 
-Storing conversation turns in the database means any client with the `session_id` can resume the conversation at any time. No server-side session state is required, and history survives server restarts. The last 10 turns are injected into each LLM call as a rolling window to bound token cost.
+Conversation history is persisted in Postgres, allowing sessions to survive restarts and resume from any client. Only the latest few turns are sent to the LLM to control token usage.
 
-**React frontend**
+React frontend
 
-The backend is a pure REST API, so I added a lightweight React + TypeScript frontend (Vite) to make the tool usable without curl. It has two views: a Home page to paste a GitHub URL and watch ingestion progress, and a Chat page with a markdown-rendering conversation interface that displays citations alongside answers.
+I added a lightweight React + TypeScript frontend with a Home page for repository ingestion and a Chat page for interacting with the indexed codebase, complete with markdown rendering and citation support.
 
 ### What Did Not Work
 
