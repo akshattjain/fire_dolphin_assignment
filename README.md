@@ -19,11 +19,7 @@
 
 ### First Understanding of the Problem
 
-The core challenge is deceptively simple to state — *"answer questions about code"* — but hard to do well. A naive approach (dump all files into an LLM context window) immediately breaks on any non-trivial repository: context windows are limited, files can be enormous, and the signal-to-noise ratio collapses quickly.
-
-The real constraint I identified was **precision**: the assignment explicitly requires file paths, line numbers, and code snippets — not vague summaries. That ruled out any approach that reasons over compressed or summarised representations of the code.
-
-A secondary constraint was **scalability**: the system must handle repositories of varying sizes without choking the HTTP layer or exhausting API budgets on a single giant file.
+The main challenge was answering questions about code accurately without overwhelming the LLM with an entire repository. Since the assignment required precise outputs like file paths, line numbers, and code snippets, using summaries or compressed representations was not reliable. Another key challenge was scalability — the system needed to efficiently handle repositories of different sizes without overloading the HTTP layer or consuming excessive API resources.
 
 ### Approaches Considered
 
